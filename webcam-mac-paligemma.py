@@ -1,9 +1,13 @@
+from functools import partial
+import os
 import PIL
 import cv2
-from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
+import requests
+from transformers import AutoProcessor, PaliGemmaForConditionalGeneration, BitsAndBytesConfig
 from PIL import Image, ImageTk
 import time
 import tkinter as tk
+import torch
 
 
 #
@@ -16,15 +20,19 @@ def on_close():
     window.destroy()
 
 
-def loop():
+def loop(device):
     ret, frame = cap.read()
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    pil_image = Image.fromarray(rgb_frame)
+    # downsample to 224x224
+    input_frame = cv2.resize(rgb_frame, (224, 224))
+    pil_image = Image.fromarray(input_frame)
 
     start_time = time.perf_counter()
-    inputs = processor(prompt, pil_image, return_tensors="pt")
+    inputs = processor(prompt, pil_image, return_tensors="pt").to(device)
+    print(f"input device {inputs['pixel_values'].device}")
     output = model.generate(**inputs, max_new_tokens=20)
+    print(f"model device {output.device}")
     result = processor.decode(output[0], skip_special_tokens=True)[len(prompt):]
     result = result.replace("\n", " ").strip(" ")
     elapsed_time = time.perf_counter() - start_time
@@ -41,7 +49,7 @@ def loop():
     imageCanvas.create_image(0, 0, image=photo, anchor=tk.NW)
     imageCanvas.image = photo
 
-    window.after(1000, loop)
+    window.after(1000, partial(loop, device='cuda' if torch.cuda.is_available() else 'cpu'))
 
 
 #
@@ -74,8 +82,18 @@ window.protocol("WM_DELETE_WINDOW", on_close)
 #
 
 model_id = "google/paligemma-3b-mix-224"
-model = PaliGemmaForConditionalGeneration.from_pretrained(model_id)
-processor = AutoProcessor.from_pretrained(model_id)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(device)
+
+hg_token = os.environ.get("HUGGINGFACE_TOKEN")
+if device == "cuda":
+    url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg?download=true"
+    image = Image.open(requests.get(url, stream=True).raw)
+    quantization_config = BitsAndBytesConfig(load_in_4bit=True, llm_int8_threshold=6.0, llm_int8_has_fp16_weight=False)
+    model = PaliGemmaForConditionalGeneration.from_pretrained(model_id, quantization_config=quantization_config, device_map=device, token=hg_token).eval()
+else:
+    model = PaliGemmaForConditionalGeneration.from_pretrained(model_id, token=hg_token).eval()
+processor = AutoProcessor.from_pretrained(model_id, token=hg_token, device_map=device)
 prompt = "What is shown in this picture?"
 
 
@@ -83,5 +101,5 @@ prompt = "What is shown in this picture?"
 # Launch
 #
 
-loop()
+loop(device=device)
 window.mainloop()

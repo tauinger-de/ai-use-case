@@ -4,6 +4,9 @@
 
 ## Setup
 
+- Needs a Huggingface key in the 'HUGGINGFACE_TOKEN' environment variable!
+- The account with the associated token must have accepted the aggreement for `google/paligemma-3b-mix-224`!
+
 ### Libraries
 
 Install lots of required libraries with pip... 
