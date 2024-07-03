@@ -2,3 +2,6 @@ pillow
 opencv-python
 transformers
 torch
+tk
+bitsandbytes
+accelerate
